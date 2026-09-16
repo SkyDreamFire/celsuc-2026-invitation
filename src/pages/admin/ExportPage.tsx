@@ -31,18 +31,27 @@ export function ExportPage() {
 
     if (!data) return;
 
+    const getInvitationData = (s: any) => {
+      const inv = Array.isArray(s.invitations) ? s.invitations[0] : s.invitations;
+      let qrList: any[] = [];
+      if (inv?.qr_codes) {
+        qrList = Array.isArray(inv.qr_codes) ? inv.qr_codes : [inv.qr_codes];
+      }
+      const isPresent = qrList.some((q: any) => q.scanne);
+      return { inv, isPresent };
+    };
+
     let filtered = data;
     if (type === 'present') {
-      filtered = data.filter((s: any) => s.invitations?.qr_codes?.some((q: any) => q.scanne));
+      filtered = data.filter((s: any) => getInvitationData(s).isPresent);
     } else if (type === 'absent') {
-      filtered = data.filter((s: any) => !s.invitations?.qr_codes?.some((q: any) => q.scanne));
+      filtered = data.filter((s: any) => !getInvitationData(s).isPresent);
     }
 
     const rows = [
       ['Nom', 'Prenom', 'Telephone', 'Langue', 'Filiere/Promotion', 'Statut', 'Present'],
       ...filtered.map((s: any) => {
-        const inv = s.invitations;
-        const isPresent = inv?.qr_codes?.some((q: any) => q.scanne);
+        const { inv, isPresent } = getInvitationData(s);
         return [
           s.nom,
           s.prenom,
