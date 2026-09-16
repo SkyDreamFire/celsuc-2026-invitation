@@ -125,13 +125,16 @@ export function GuestListPage() {
       g.prenom.toLowerCase().includes(search.toLowerCase()) ||
       g.telephone.includes(search) ||
       (g.filiere_promotion && g.filiere_promotion.toLowerCase().includes(search.toLowerCase()));
-    const matchStatus = filterStatus === 'all' || g.invitation?.statut === filterStatus;
+    const matchStatus =
+      filterStatus === 'all' ||
+      (filterStatus === 'en_attente' && (!g.invitation || g.invitation.statut === 'en_attente')) ||
+      (filterStatus !== 'en_attente' && g.invitation?.statut === filterStatus);
     return matchSearch && matchStatus;
   });
 
   const stats = {
     total: guests.length,
-    pending: guests.filter((g) => g.invitation?.statut === 'en_attente').length,
+    pending: guests.filter((g) => !g.invitation || g.invitation?.statut === 'en_attente').length,
     confirmed: guests.filter((g) => g.invitation?.statut === 'confirmee').length,
     refused: guests.filter((g) => g.invitation?.statut === 'refusee').length,
   };
@@ -420,9 +423,9 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
           >
             <div className="flex items-center justify-between text-xs font-medium opacity-80 mb-1">
               <span>{t('pending')}</span>
-              <Clock className="w-4 h-4 text-amber-500" />
+              <Clock className={`w-4 h-4 ${filterStatus === 'en_attente' ? 'text-white/80' : 'text-amber-500'}`} />
             </div>
-            <p className="text-2xl font-bold text-amber-600">{stats.pending}</p>
+            <p className={`text-2xl font-bold ${filterStatus === 'en_attente' ? 'text-white' : 'text-amber-600'}`}>{stats.pending}</p>
           </button>
 
           <button
@@ -435,9 +438,9 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
           >
             <div className="flex items-center justify-between text-xs font-medium opacity-80 mb-1">
               <span>{t('confirmed')}</span>
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+              <CheckCircle2 className={`w-4 h-4 ${filterStatus === 'confirmee' ? 'text-white/80' : 'text-emerald-500'}`} />
             </div>
-            <p className="text-2xl font-bold text-emerald-600">{stats.confirmed}</p>
+            <p className={`text-2xl font-bold ${filterStatus === 'confirmee' ? 'text-white' : 'text-emerald-600'}`}>{stats.confirmed}</p>
           </button>
 
           <button
@@ -450,9 +453,9 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
           >
             <div className="flex items-center justify-between text-xs font-medium opacity-80 mb-1">
               <span>{t('refused')}</span>
-              <XCircle className="w-4 h-4 text-rose-500" />
+              <XCircle className={`w-4 h-4 ${filterStatus === 'refusee' ? 'text-white/80' : 'text-rose-500'}`} />
             </div>
-            <p className="text-2xl font-bold text-rose-600">{stats.refused}</p>
+            <p className={`text-2xl font-bold ${filterStatus === 'refusee' ? 'text-white' : 'text-rose-600'}`}>{stats.refused}</p>
           </button>
         </div>
 
