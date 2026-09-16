@@ -1,7 +1,23 @@
--- Migration: Correction du bug RLS et sécurisation côté serveur de la confirmation d'invitation
--- Fonction RPC SECURITY DEFINER pour répondre à une invitation (confirmer ou refuser)
--- Garantit l'atomicité, l'irrévocabilité, le respect de la date limite et la génération sécurisée du QR Code côté serveur.
+-- Migration: Fix RLS on admins table and RPC function
+-- 
+-- Problem 1: RLS circular dependency on admins table
+--   The existing policy uses is_admin() which queries the admins table itself.
+--   This means a freshly logged-in user can't read their admin profile.
+-- Fix: Add a self-read policy based on auth_id = auth.uid() directly.
+--
+-- Problem 2: gen_random_bytes not found in RPC function
+--   The repondre_invitation function uses gen_random_bytes without schema prefix.
+-- Fix: Use extensions.gen_random_bytes(32).
 
+-- Fix 1: Allow authenticated users to read their OWN admin profile
+-- (avoids the circular dependency of is_admin())
+DROP POLICY IF EXISTS "admin_read_own_profile" ON admins;
+CREATE POLICY "admin_read_own_profile" ON admins
+  FOR SELECT
+  TO authenticated
+  USING (auth_id = auth.uid());
+
+-- Fix 2: Recreate the RPC function with the correct extensions.gen_random_bytes
 CREATE OR REPLACE FUNCTION repondre_invitation(
   p_jeton text,
   p_statut text
@@ -9,7 +25,7 @@ CREATE OR REPLACE FUNCTION repondre_invitation(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, extensions
 AS $$
 DECLARE
   v_invitation record;
@@ -48,7 +64,7 @@ BEGIN
     );
   END IF;
 
-  -- 4. Règle d'irrévocabilité : une réponse déjà enregistrée ne peut plus être modifiée par l'étudiant
+  -- 4. Règle d'irrévocabilité
   IF v_invitation.statut <> 'en_attente' THEN
     RETURN jsonb_build_object(
       'success', false,
@@ -59,29 +75,15 @@ BEGIN
 
   -- 5. Traitement selon la confirmation ou le refus
   IF p_statut = 'confirmee' THEN
-    -- Génération d'un jeton aléatoire sécurisé côté serveur (64 caractères hexadécimaux)
+    -- Génération sécurisée du jeton QR (extensions.gen_random_bytes est pgcrypto)
     v_qr_token := encode(extensions.gen_random_bytes(32), 'hex');
 
-    -- Mise à jour de l'invitation
     UPDATE invitations
-    SET
-      statut = 'confirmee',
-      date_reponse = v_now
+    SET statut = 'confirmee', date_reponse = v_now
     WHERE id = v_invitation.id;
 
-    -- Création atomique du QR Code
-    INSERT INTO qr_codes (
-      invitation_id,
-      jeton_qr_unique,
-      genere_le,
-      scanne
-    )
-    VALUES (
-      v_invitation.id,
-      v_qr_token,
-      v_now,
-      false
-    )
+    INSERT INTO qr_codes (invitation_id, jeton_qr_unique, genere_le, scanne)
+    VALUES (v_invitation.id, v_qr_token, v_now, false)
     ON CONFLICT (invitation_id) DO UPDATE
     SET jeton_qr_unique = EXCLUDED.jeton_qr_unique,
         genere_le = v_now,
@@ -97,14 +99,10 @@ BEGIN
     );
 
   ELSE
-    -- Cas du refus
     UPDATE invitations
-    SET
-      statut = 'refusee',
-      date_reponse = v_now
+    SET statut = 'refusee', date_reponse = v_now
     WHERE id = v_invitation.id;
 
-    -- Suppression d'un QR code éventuel
     DELETE FROM qr_codes WHERE invitation_id = v_invitation.id;
 
     RETURN jsonb_build_object(
@@ -116,16 +114,5 @@ BEGIN
 END;
 $$;
 
--- Accorder les droits d'exécution de la fonction aux rôles anonyme et authentifié
+-- Re-grant permissions
 GRANT EXECUTE ON FUNCTION repondre_invitation(text, text) TO anon, authenticated;
-
--- Sécurité RLS pour qr_codes : autoriser les utilisateurs anonymes à lire leur propre QR Code
-DROP POLICY IF EXISTS "anon_select_qr_codes" ON qr_codes;
-CREATE POLICY "anon_select_qr_codes" ON qr_codes FOR SELECT
-  TO anon, authenticated USING (true);
-
--- Définir le logo officiel IUC par défaut dans event_settings si vide
-UPDATE event_settings
-SET logo_url = '/logo-iuc.png'
-WHERE logo_url IS NULL OR logo_url = '';
-
