@@ -1,0 +1,2 @@
+[functions.whatsapp-queue-processor]
+verify_jwt = false
