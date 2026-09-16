@@ -147,28 +147,83 @@ export function GuestListPage() {
   };
 
   // Construction du message WhatsApp avec variables
-  const buildWhatsAppMessage = (prenom: string, langue: Language, jeton: string) => {
+  const buildWhatsAppMessage = (
+    prenom: string,
+    nom: string,
+    langue: Language,
+    jeton: string
+  ) => {
+    const fullName = `${prenom} ${nom}`.trim() || prenom;
+
+    const defaultFr = `🎓✨ Bonjour {nom_complet} !
+
+Vous êtes cordialement invité(e) à la grande soirée CELSUC 2026 🥳🎉
+
+📅 Date : {date_evenement}
+📍 Lieu : {lieu}
+🕕 Heure : {heure_debut}
+👔 Dress code : {dress_code}
+
+🙏🏾 Merci de confirmer votre présence avant le {date_limite} via le lien ci-dessous :
+
+🔗 {lien}
+
+✨ Nous avons hâte de vous compter parmi nous ! 🥂🎊`;
+
+    const defaultEn = `🎓✨ Hello {nom_complet} !
+
+You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
+
+📅 Date: {date_evenement}
+📍 Location: {lieu}
+🕕 Time: {heure_debut}
+👔 Dress code: {dress_code}
+
+🙏🏾 Please confirm your attendance before {date_limite} via the link below:
+
+🔗 {lien}
+
+✨ We look forward to celebrating with you! 🥂🎊`;
+
     const template =
       langue === 'fr'
-        ? settings?.whatsapp_template_fr ||
-          'Bonjour {prenom}, vous êtes invité(e) au gala CELSUC 2026 le {date_evenement} à {lieu}. Confirmez votre présence avant le {date_limite} : {lien}'
-        : settings?.whatsapp_template_en ||
-          'Hello {prenom}, you are invited to the CELSUC 2026 gala on {date_evenement} at {lieu}. Confirm your attendance before {date_limite} : {lien}';
+        ? settings?.whatsapp_template_fr || defaultFr
+        : settings?.whatsapp_template_en || defaultEn;
 
     const link = `${window.location.origin}/#/invitation/${jeton}`;
+
+    // Formatage des dates en lettres (ex: 19 septembre 2026)
     const dateEvent = settings?.date_evenement
-      ? new Date(settings.date_evenement).toLocaleDateString()
-      : '19/09/2026';
-    const lieuEvent = settings?.lieu || 'IUC Campus de Dschang';
+      ? new Date(settings.date_evenement + 'T00:00:00').toLocaleDateString(
+          langue === 'fr' ? 'fr-FR' : 'en-US',
+          { day: 'numeric', month: 'long', year: 'numeric' }
+        )
+      : langue === 'fr'
+      ? '19 septembre 2026'
+      : 'September 19, 2026';
+
+    const lieuEvent = settings?.lieu || 'IUC – Campus de Dschang';
+    const heureDebut = settings?.heure_debut || '18 h 00';
+    const dressCode = settings?.dress_code || 'Black or White 🖤🤍';
+
     const dateLimite = settings?.date_limite_confirmation
-      ? new Date(settings.date_limite_confirmation).toLocaleDateString()
-      : '18/09/2026';
+      ? new Date(settings.date_limite_confirmation).toLocaleDateString(
+          langue === 'fr' ? 'fr-FR' : 'en-US',
+          { day: 'numeric', month: 'long', year: 'numeric' }
+        )
+      : langue === 'fr'
+      ? '18 septembre 2026'
+      : 'September 18, 2026';
 
     return template
-      .replace(/{prenom}/g, prenom)
+      .replace(/{nom_complet}/g, fullName)
+      .replace(/{prenom}/g, fullName)
+      .replace(/{nom}/g, nom)
       .replace(/{lien}/g, link)
       .replace(/{date_evenement}/g, dateEvent)
       .replace(/{lieu}/g, lieuEvent)
+      .replace(/{heure_debut}/g, heureDebut)
+      .replace(/{dress_code}/g, dressCode)
       .replace(/{date_limite}/g, dateLimite);
   };
 
@@ -176,11 +231,12 @@ export function GuestListPage() {
   const handleSendWhatsApp = async (
     invitationId: string,
     prenom: string,
+    nom: string,
     langue: Language,
     jeton: string,
     rawPhone: string
   ) => {
-    const content = buildWhatsAppMessage(prenom, langue, jeton);
+    const content = buildWhatsAppMessage(prenom, nom, langue, jeton);
     const cleanPhone = formatPhoneForWhatsApp(rawPhone);
 
     // 1. Enregistrer dans la table d'historique whatsapp_queue
@@ -572,6 +628,7 @@ export function GuestListPage() {
                                     handleSendWhatsApp(
                                       g.invitation!.id,
                                       g.prenom,
+                                      g.nom,
                                       g.langue,
                                       g.invitation!.jeton_unique,
                                       g.telephone
@@ -692,7 +749,7 @@ export function GuestListPage() {
                   Aperçu du message type :
                 </p>
                 <p className="text-xs text-emerald-950 font-mono whitespace-pre-line leading-relaxed">
-                  {buildWhatsAppMessage('[Prénom]', 'fr', 'ex-token-123456')}
+                  {buildWhatsAppMessage('[Prénom]', '[Nom]', 'fr', 'ex-token-123456')}
                 </p>
               </div>
 
@@ -734,6 +791,7 @@ export function GuestListPage() {
                             handleSendWhatsApp(
                               g.invitation!.id,
                               g.prenom,
+                              g.nom,
                               g.langue,
                               g.invitation!.jeton_unique,
                               g.telephone
