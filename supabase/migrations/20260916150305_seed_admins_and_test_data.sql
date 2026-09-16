@@ -15,6 +15,10 @@
 - Admin1 = super_admin, Admin2-3 = agent_accueil, Admin4-7 = consultation
 */
 
+-- Enable pgcrypto extension for password hashing (gen_salt, crypt)
+-- On Supabase, pgcrypto lives in the 'extensions' schema
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+
 -- Insert default event settings if not exists
 INSERT INTO event_settings (id, nom_evenement, date_evenement, heure_debut, heure_fin, lieu, dress_code, date_limite_confirmation, logo_url, langue_par_defaut)
 SELECT gen_random_uuid(), 'CELSUC 2026', '2026-09-19', '17:00', '22:00', 'IUC Campus de Dschang', 'Black and White', '2026-09-18 23:59:59+01', '/logo-iuc.png', 'fr'
@@ -52,7 +56,7 @@ BEGIN
         'authenticated',
         'authenticated',
         admin_emails[i],
-        crypt('AdminIUC123', gen_salt('bf')),
+        extensions.crypt('AdminIUC123', extensions.gen_salt('bf')),
         now(),
         now(),
         now(),
@@ -101,23 +105,23 @@ BEGIN
   -- Invitation 1: confirmed with QR code
   inv1_id := gen_random_uuid();
   INSERT INTO invitations (id, student_id, jeton_unique, statut, date_reponse, date_limite_confirmation)
-  VALUES (inv1_id, s1_id, encode(gen_random_bytes(32), 'hex'), 'confirmee', now(), settings_deadline);
+  VALUES (inv1_id, s1_id, encode(extensions.gen_random_bytes(32), 'hex'), 'confirmee', now(), settings_deadline);
 
   INSERT INTO qr_codes (invitation_id, jeton_qr_unique)
-  VALUES (inv1_id, encode(gen_random_bytes(32), 'hex'));
+  VALUES (inv1_id, encode(extensions.gen_random_bytes(32), 'hex'));
 
   -- Invitation 2: confirmed with QR code
   inv2_id := gen_random_uuid();
   INSERT INTO invitations (id, student_id, jeton_unique, statut, date_reponse, date_limite_confirmation)
-  VALUES (inv2_id, s2_id, encode(gen_random_bytes(32), 'hex'), 'confirmee', now(), settings_deadline);
+  VALUES (inv2_id, s2_id, encode(extensions.gen_random_bytes(32), 'hex'), 'confirmee', now(), settings_deadline);
 
   INSERT INTO qr_codes (invitation_id, jeton_qr_unique)
-  VALUES (inv2_id, encode(gen_random_bytes(32), 'hex'));
+  VALUES (inv2_id, encode(extensions.gen_random_bytes(32), 'hex'));
 
   -- Invitation 3: pending, no QR
   inv3_id := gen_random_uuid();
   INSERT INTO invitations (id, student_id, jeton_unique, statut, date_limite_confirmation)
-  VALUES (inv3_id, s3_id, encode(gen_random_bytes(32), 'hex'), 'en_attente', settings_deadline);
+  VALUES (inv3_id, s3_id, encode(extensions.gen_random_bytes(32), 'hex'), 'en_attente', settings_deadline);
 
   -- Add WhatsApp queue entries
   INSERT INTO whatsapp_queue (invitation_id, contenu, statut)
