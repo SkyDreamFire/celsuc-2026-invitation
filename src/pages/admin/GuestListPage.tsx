@@ -34,6 +34,8 @@ interface GuestRow {
     statut: InvitationStatus;
     date_reponse: string | null;
     qr_codes: { id: string; scanne: boolean }[];
+    whatsapp_sent: boolean;
+    whatsapp_queue: { id: string; statut: string; created_at: string }[];
   } | null;
 }
 
@@ -73,7 +75,11 @@ export function GuestListPage() {
         .from('students')
         .select(`
           id, nom, prenom, telephone, langue, filiere_promotion,
-          invitations(id, jeton_unique, statut, date_reponse, qr_codes(id, scanne))
+          invitations(
+            id, jeton_unique, statut, date_reponse,
+            qr_codes(id, scanne),
+            whatsapp_queue(id, statut, created_at)
+          )
         `)
         .order('nom', { ascending: true }),
       supabase.from('event_settings').select('*').limit(1).maybeSingle(),
@@ -91,6 +97,13 @@ export function GuestListPage() {
           qrList = Array.isArray(inv.qr_codes) ? inv.qr_codes : [inv.qr_codes];
         }
 
+        let waList: { id: string; statut: string; created_at: string }[] = [];
+        if (inv?.whatsapp_queue) {
+          waList = Array.isArray(inv.whatsapp_queue) ? inv.whatsapp_queue : [inv.whatsapp_queue];
+        }
+
+        const isSent = waList.some((w) => w.statut === 'envoye' || w.statut === 'livre');
+
         return {
           id: s.id,
           nom: s.nom,
@@ -105,6 +118,8 @@ export function GuestListPage() {
                 statut: inv.statut,
                 date_reponse: inv.date_reponse,
                 qr_codes: qrList,
+                whatsapp_sent: isSent,
+                whatsapp_queue: waList,
               }
             : null,
         };
@@ -118,6 +133,11 @@ export function GuestListPage() {
     fetchGuestsAndSettings();
   }, []);
 
+  // Helper pour savoir si l'invitation n'a pas encore été envoyée par WhatsApp
+  const isGuestPendingWhatsApp = (g: GuestRow) => {
+    return !g.invitation || !g.invitation.whatsapp_sent;
+  };
+
   const filtered = useMemo(() => {
     return guests.filter((g) => {
       const matchSearch =
@@ -126,10 +146,21 @@ export function GuestListPage() {
         g.prenom.toLowerCase().includes(search.toLowerCase()) ||
         g.telephone.includes(search) ||
         (g.filiere_promotion && g.filiere_promotion.toLowerCase().includes(search.toLowerCase()));
-      const matchStatus =
-        filterStatus === 'all' ||
-        (filterStatus === 'en_attente' && (!g.invitation || g.invitation.statut === 'en_attente')) ||
-        (filterStatus !== 'en_attente' && g.invitation?.statut === filterStatus);
+
+      let matchStatus = true;
+      if (filterStatus === 'en_attente') {
+        // Affiche la liste des invités dont l'invitation n'a pas encore été envoyée par WhatsApp
+        matchStatus = isGuestPendingWhatsApp(g);
+      } else if (filterStatus === 'confirmee') {
+        matchStatus = g.invitation?.statut === 'confirmee';
+      } else if (filterStatus === 'refusee') {
+        matchStatus = g.invitation?.statut === 'refusee';
+      } else if (filterStatus === 'all') {
+        matchStatus = true;
+      } else {
+        matchStatus = g.invitation?.statut === filterStatus;
+      }
+
       return matchSearch && matchStatus;
     });
   }, [guests, search, filterStatus]);
@@ -137,10 +168,16 @@ export function GuestListPage() {
   const stats = useMemo(() => {
     return {
       total: guests.length,
-      pending: guests.filter((g) => !g.invitation || g.invitation?.statut === 'en_attente').length,
+      // Nombre d'invités dont l'invitation n'a pas encore été envoyée par WhatsApp
+      pending: guests.filter((g) => isGuestPendingWhatsApp(g)).length,
       confirmed: guests.filter((g) => g.invitation?.statut === 'confirmee').length,
       refused: guests.filter((g) => g.invitation?.statut === 'refusee').length,
     };
+  }, [guests]);
+
+  // Invités en attente d'envoi WhatsApp pour le modal et le bouton d'envoi groupé
+  const pendingGuests = useMemo(() => {
+    return guests.filter((g) => isGuestPendingWhatsApp(g));
   }, [guests]);
 
   // Helper pour nettoyer et normaliser les numéros de téléphone camerounais/internationaux
@@ -162,97 +199,133 @@ export function GuestListPage() {
   ) => {
     const fullName = `${prenom} ${nom}`.trim() || prenom;
 
-    const defaultFr = `🎓✨ Bonjour {nom_complet} !
+    // Date de l'événement
+    let eventDateFormatted = '19/09/2026';
+    if (settings?.date_evenement) {
+      try {
+        const d = new Date(settings.date_evenement);
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = d.getFullYear();
+        eventDateFormatted = `${day}/${month}/${year}`;
+      } catch {
+        eventDateFormatted = settings.date_evenement;
+      }
+    }
+
+    // Date limite de confirmation
+    let deadlineFormatted = '18/09/2026';
+    if (settings?.date_limite_confirmation) {
+      try {
+        const d = new Date(settings.date_limite_confirmation);
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = d.getFullYear();
+        deadlineFormatted = `${day}/${month}/${year}`;
+      } catch {
+        deadlineFormatted = settings.date_limite_confirmation;
+      }
+    }
+
+    const eventLocation = settings?.lieu || 'IUC – Campus de Dschang';
+    const eventTime = settings?.heure_debut || '18 h 00';
+    const eventDressCode = settings?.dress_code || 'Black or White 🖤🤍';
+
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://celsuc-2026-invitation.vercel.app';
+    const link = `${origin}/#/invitation/${jeton}`;
+
+    if (langue === 'en') {
+      return (
+`🎓✨ Hello ${fullName} !
+
+You are cordially invited to the grand CELSUC 2026 Gala Evening 🥳🎉
+
+📅 Date: ${eventDateFormatted}
+📍 Venue: ${eventLocation}
+🕕 Time: ${eventTime}
+👔 Dress code: ${eventDressCode}
+
+🙏🏾 Please confirm your attendance before ${deadlineFormatted} via the link below:
+
+🔗 ${link}
+
+✨ We look forward to having you with us! 🥂🎊`
+      );
+    }
+
+    return (
+`🎓✨ Bonjour ${fullName} !
 
 Vous êtes cordialement invité(e) à la grande soirée CELSUC 2026 🥳🎉
 
-📅 Date : {date_evenement}
-📍 Lieu : {lieu}
-🕕 Heure : {heure_debut}
-👔 Dress code : {dress_code}
+📅 Date : ${eventDateFormatted}
+📍 Lieu : ${eventLocation}
+🕕 Heure : ${eventTime}
+👔 Dress code : ${eventDressCode}
 
-🙏🏾 Merci de confirmer votre présence avant le {date_limite} via le lien ci-dessous :
+🙏🏾 Merci de confirmer votre présence avant le ${deadlineFormatted} via le lien ci-dessous :
 
-🔗 {lien}
+🔗 ${link}
 
-✨ Nous avons hâte de vous compter parmi nous ! 🥂🎊`;
-
-    const defaultEn = `🎓✨ Hello {nom_complet} !
-
-You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
-
-📅 Date: {date_evenement}
-📍 Location: {lieu}
-🕕 Time: {heure_debut}
-👔 Dress code: {dress_code}
-
-🙏🏾 Please confirm your attendance before {date_limite} via the link below:
-
-🔗 {lien}
-
-✨ We look forward to celebrating with you! 🥂🎊`;
-
-    const template =
-      langue === 'fr'
-        ? settings?.whatsapp_template_fr || defaultFr
-        : settings?.whatsapp_template_en || defaultEn;
-
-    const link = `${window.location.origin}/#/invitation/${jeton}`;
-
-    // Formatage des dates en lettres (ex: 19 septembre 2026)
-    const dateEvent = settings?.date_evenement
-      ? new Date(settings.date_evenement + 'T00:00:00').toLocaleDateString(
-          langue === 'fr' ? 'fr-FR' : 'en-US',
-          { day: 'numeric', month: 'long', year: 'numeric' }
-        )
-      : langue === 'fr'
-      ? '19 septembre 2026'
-      : 'September 19, 2026';
-
-    const lieuEvent = settings?.lieu || 'IUC – Campus de Dschang';
-    const heureDebut = settings?.heure_debut || '18 h 00';
-    const dressCode = settings?.dress_code || 'Black or White 🖤🤍';
-
-    const dateLimite = settings?.date_limite_confirmation
-      ? new Date(settings.date_limite_confirmation).toLocaleDateString(
-          langue === 'fr' ? 'fr-FR' : 'en-US',
-          { day: 'numeric', month: 'long', year: 'numeric' }
-        )
-      : langue === 'fr'
-      ? '18 septembre 2026'
-      : 'September 18, 2026';
-
-    return template
-      .replace(/{nom_complet}/g, fullName)
-      .replace(/{prenom}/g, fullName)
-      .replace(/{nom}/g, nom)
-      .replace(/{lien}/g, link)
-      .replace(/{date_evenement}/g, dateEvent)
-      .replace(/{lieu}/g, lieuEvent)
-      .replace(/{heure_debut}/g, heureDebut)
-      .replace(/{dress_code}/g, dressCode)
-      .replace(/{date_limite}/g, dateLimite);
+✨ Nous avons hâte de vous compter parmi nous ! 🥂🎊`
+    );
   };
 
-  // Envoi WhatsApp individuel (ouvre WhatsApp Web / App et enregistre dans la queue)
+  // Envoi individuel WhatsApp (avec auto-création d'invitation si manquante)
   const handleSendWhatsApp = async (
-    invitationId: string,
+    invitationId: string | null,
     prenom: string,
     nom: string,
     langue: Language,
-    jeton: string,
-    rawPhone: string
+    jeton: string | null,
+    rawPhone: string,
+    studentId?: string
   ) => {
-    const content = buildWhatsAppMessage(prenom, nom, langue, jeton);
+    let activeInvId = invitationId;
+    let activeToken = jeton;
+
+    // Si l'étudiant n'a pas encore d'invitation générée, on la crée à la volée
+    if (!activeInvId || !activeToken) {
+      if (studentId) {
+        const newToken = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+          ? crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '')
+          : Math.random().toString(36).substring(2) + Date.now().toString(36) + Math.random().toString(36).substring(2);
+
+        const { data: newInv, error: invErr } = await supabase
+          .from('invitations')
+          .insert({
+            student_id: studentId,
+            jeton_unique: newToken,
+            statut: 'en_attente',
+          })
+          .select()
+          .single();
+
+        if (invErr || !newInv) {
+          alert("Erreur lors de la création automatique de l'invitation : " + (invErr?.message || 'Inconnue'));
+          return;
+        }
+
+        activeInvId = newInv.id;
+        activeToken = newInv.jeton_unique;
+      } else {
+        alert("Impossible d'envoyer sans invitation.");
+        return;
+      }
+    }
+
+    const content = buildWhatsAppMessage(prenom, nom, langue, activeToken);
     const cleanPhone = formatPhoneForWhatsApp(rawPhone);
 
     // 1. Enregistrer dans la table d'historique whatsapp_queue
-    await supabase.from('whatsapp_queue').insert({
-      invitation_id: invitationId,
-      contenu: content,
-      statut: 'envoye',
-      tentative_envoi_le: new Date().toISOString(),
-    });
+    if (activeInvId) {
+      await supabase.from('whatsapp_queue').insert({
+        invitation_id: activeInvId,
+        contenu: content,
+        statut: 'envoye',
+        tentative_envoi_le: new Date().toISOString(),
+      });
+    }
 
     // 2. Ouvrir directement WhatsApp
     const waUrl = cleanPhone
@@ -261,6 +334,7 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
 
     window.open(waUrl, '_blank');
     showToast(t('whatsappSent'));
+    fetchGuestsAndSettings();
   };
 
   // Copie de lien individuel
@@ -387,8 +461,6 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
     );
   };
 
-  const pendingGuests = guests.filter((g) => g.invitation && g.invitation.statut === 'en_attente');
-
   return (
     <AdminLayout title={t('guestList')}>
       <div className="space-y-5">
@@ -427,9 +499,11 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
           >
             <div className="flex items-center justify-between text-xs font-medium opacity-80 mb-1">
               <span>{t('pending')}</span>
-              <Clock className={`w-4 h-4 ${filterStatus === 'en_attente' ? 'text-white/80' : 'text-amber-500'}`} />
+              <Clock className={`w-4 h-4 ${filterStatus === 'en_attente' ? 'text-white' : 'text-amber-500'}`} />
             </div>
-            <p className={`text-2xl font-bold ${filterStatus === 'en_attente' ? 'text-white' : 'text-amber-600'}`}>{stats.pending}</p>
+            <p className={`text-2xl font-bold ${filterStatus === 'en_attente' ? 'text-white' : 'text-amber-600'}`}>
+              {stats.pending}
+            </p>
           </button>
 
           <button
@@ -442,9 +516,11 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
           >
             <div className="flex items-center justify-between text-xs font-medium opacity-80 mb-1">
               <span>{t('confirmed')}</span>
-              <CheckCircle2 className={`w-4 h-4 ${filterStatus === 'confirmee' ? 'text-white/80' : 'text-emerald-500'}`} />
+              <CheckCircle2 className={`w-4 h-4 ${filterStatus === 'confirmee' ? 'text-white' : 'text-emerald-500'}`} />
             </div>
-            <p className={`text-2xl font-bold ${filterStatus === 'confirmee' ? 'text-white' : 'text-emerald-600'}`}>{stats.confirmed}</p>
+            <p className={`text-2xl font-bold ${filterStatus === 'confirmee' ? 'text-white' : 'text-emerald-600'}`}>
+              {stats.confirmed}
+            </p>
           </button>
 
           <button
@@ -457,9 +533,11 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
           >
             <div className="flex items-center justify-between text-xs font-medium opacity-80 mb-1">
               <span>{t('refused')}</span>
-              <XCircle className={`w-4 h-4 ${filterStatus === 'refusee' ? 'text-white/80' : 'text-rose-500'}`} />
+              <XCircle className={`w-4 h-4 ${filterStatus === 'refusee' ? 'text-white' : 'text-rose-500'}`} />
             </div>
-            <p className={`text-2xl font-bold ${filterStatus === 'refusee' ? 'text-white' : 'text-rose-600'}`}>{stats.refused}</p>
+            <p className={`text-2xl font-bold ${filterStatus === 'refusee' ? 'text-white' : 'text-rose-600'}`}>
+              {stats.refused}
+            </p>
           </button>
         </div>
 
@@ -483,9 +561,9 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
               className="px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#33A944] focus:border-transparent outline-none font-medium text-gray-700"
             >
               <option value="all">{t('allStatuses')}</option>
-              <option value="en_attente">{t('pending')}</option>
-              <option value="confirmee">{t('confirmed')}</option>
-              <option value="refusee">{t('refused')}</option>
+              <option value="en_attente">En attente d'envoi WhatsApp ({stats.pending})</option>
+              <option value="confirmee">{t('confirmed')} ({stats.confirmed})</option>
+              <option value="refusee">{t('refused')} ({stats.refused})</option>
             </select>
           </div>
 
@@ -495,7 +573,7 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
               <button
                 onClick={() => setShowBulkSend(true)}
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-semibold shadow-sm transition-all"
-                title="Ouvrir la fenêtre d'envoi des invitations"
+                title="Ouvrir la fenêtre d'envoi des invitations WhatsApp"
               >
                 <Send className="w-4 h-4" />
                 <span>{t('sendInvitations')}</span>
@@ -521,7 +599,7 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
             {canEdit && (
               <button
                 onClick={() => setShowAdd(true)}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-[#33A944] text-white rounded-xl text-sm font-semibold hover:bg-[#2a8a38] shadow-sm transition-all"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-[#33A944] hover:bg-[#2a8a38] text-white rounded-xl text-sm font-semibold shadow-sm transition-all"
               >
                 <Plus className="w-4 h-4" />
                 <span>{t('addGuest')}</span>
@@ -530,41 +608,32 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
           </div>
         </div>
 
-        {/* Table */}
+        {/* Tableau des invités */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           {loading ? (
             <div className="p-12 text-center text-gray-400">
-              <div className="inline-block w-8 h-8 border-4 border-[#33A944] border-t-transparent rounded-full animate-spin mb-3" />
-              <p className="font-medium">{t('loading')}</p>
+              <div className="w-8 h-8 border-3 border-[#33A944]/20 border-t-[#33A944] rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-sm">{t('loading')}</p>
             </div>
           ) : filtered.length === 0 ? (
             <div className="p-12 text-center text-gray-400">
-              <Users className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-              <p className="font-medium">{t('noResults') || 'Aucun invité trouvé'}</p>
+              <Users className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+              <p className="font-semibold text-gray-700">{t('noGuests')}</p>
+              <p className="text-xs text-gray-400 mt-1">
+                {search ? 'Essayez de modifier vos filtres de recherche.' : ''}
+              </p>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50/80 border-b border-gray-100">
+              <table className="w-full text-left">
+                <thead className="bg-gray-50/80 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   <tr>
-                    <th className="text-left text-xs font-semibold text-gray-500 uppercase px-4 py-3.5">
-                      {t('name')}
-                    </th>
-                    <th className="text-left text-xs font-semibold text-gray-500 uppercase px-4 py-3.5 hidden md:table-cell">
-                      {t('phone')}
-                    </th>
-                    <th className="text-left text-xs font-semibold text-gray-500 uppercase px-4 py-3.5 hidden lg:table-cell">
-                      {t('language')}
-                    </th>
-                    <th className="text-left text-xs font-semibold text-gray-500 uppercase px-4 py-3.5">
-                      {t('status')}
-                    </th>
-                    <th className="text-left text-xs font-semibold text-gray-500 uppercase px-4 py-3.5 hidden lg:table-cell">
-                      QR Code
-                    </th>
-                    <th className="text-right text-xs font-semibold text-gray-500 uppercase px-4 py-3.5">
-                      {t('actions')}
-                    </th>
+                    <th className="px-4 py-3.5">{t('name')}</th>
+                    <th className="px-4 py-3.5 hidden md:table-cell">{t('phone')}</th>
+                    <th className="px-4 py-3.5 hidden lg:table-cell">{t('language')}</th>
+                    <th className="px-4 py-3.5">{t('status')}</th>
+                    <th className="px-4 py-3.5 hidden lg:table-cell">Présence QR</th>
+                    <th className="px-4 py-3.5 text-right">{t('actions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -599,10 +668,25 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
                         </span>
                       </td>
 
-                      {/* Statut */}
+                      {/* Statut & WhatsApp */}
                       <td className="px-4 py-3.5">
-                        {g.invitation ? statusBadge(g.invitation.statut) : (
-                          <span className="text-xs text-gray-400 italic">Sans invitation</span>
+                        {g.invitation ? (
+                          <div className="flex flex-col gap-1 items-start">
+                            {statusBadge(g.invitation.statut)}
+                            {g.invitation.whatsapp_sent ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-medium">
+                                <Check className="w-3 h-3 text-emerald-600" /> WhatsApp envoyé
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[11px] text-amber-700 font-medium">
+                                <Clock className="w-3 h-3 text-amber-600" /> WhatsApp non envoyé
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-amber-600 font-medium bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                            Sans invitation
+                          </span>
                         )}
                       </td>
 
@@ -697,14 +781,34 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
                               )}
                             </>
                           ) : (
-                            /* Si l'étudiant n'a pas d'invitation générée */
+                            /* Si l'étudiant n'a pas encore d'invitation générée */
                             canEdit && (
-                              <button
-                                onClick={() => handleCreateInvitation(g.id)}
-                                className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 transition-all"
-                              >
-                                {t('createInvitation')}
-                              </button>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() =>
+                                    handleSendWhatsApp(
+                                      null,
+                                      g.prenom,
+                                      g.nom,
+                                      g.langue,
+                                      null,
+                                      g.telephone,
+                                      g.id
+                                    )
+                                  }
+                                  title="Générer et envoyer par WhatsApp"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-all shadow-xs"
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                  <span>Envoyer WhatsApp</span>
+                                </button>
+                                <button
+                                  onClick={() => handleCreateInvitation(g.id)}
+                                  className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-medium transition-all"
+                                >
+                                  {t('createInvitation')}
+                                </button>
+                              </div>
                             )
                           )}
                         </div>
@@ -727,7 +831,7 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
 
       {/* Modal d'envoi groupé des invitations WhatsApp */}
       {showBulkSend && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between pb-4 border-b border-gray-100">
               <div className="flex items-center gap-3">
@@ -737,7 +841,7 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
                 <div>
                   <h3 className="font-bold text-gray-900 text-lg">{t('bulkSendWhatsapp')}</h3>
                   <p className="text-xs text-gray-500">
-                    {pendingGuests.length} invité(s) en attente d'envoi
+                    {pendingGuests.length} invité(s) dont l'invitation n'a pas encore été envoyée par WhatsApp
                   </p>
                 </div>
               </div>
@@ -750,7 +854,7 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
             </div>
 
             <div className="my-4 overflow-y-auto space-y-4 pr-1">
-              {/* Message Template Preview */}
+              {/* Aperçu du message type */}
               <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl">
                 <p className="text-xs font-bold uppercase text-emerald-800 tracking-wider mb-1">
                   Aperçu du message type :
@@ -760,7 +864,7 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
                 </p>
               </div>
 
-              {/* Action Buttons */}
+              {/* Bouton d'action rapide */}
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={handleCopyAllLinks}
@@ -771,14 +875,14 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
                 </button>
               </div>
 
-              {/* Guest list with quick 1-click WhatsApp buttons */}
+              {/* Liste des invités avec bouton d'envoi 1-clic */}
               <div className="border border-gray-100 rounded-2xl overflow-hidden">
-                <div className="bg-gray-50 px-4 py-2.5 text-xs font-semibold text-gray-600 border-b border-gray-100">
-                  Envoi 1-clic par invité ({pendingGuests.length})
+                <div className="bg-gray-50 px-4 py-2.5 text-xs font-semibold text-gray-600 border-b border-gray-100 flex items-center justify-between">
+                  <span>En attente d'envoi WhatsApp ({pendingGuests.length})</span>
                 </div>
                 {pendingGuests.length === 0 ? (
                   <div className="p-6 text-center text-xs text-gray-400">
-                    Toutes les invitations sont déjà confirmées ou refusées !
+                    Toutes les invitations ont déjà été envoyées par WhatsApp !
                   </div>
                 ) : (
                   <div className="divide-y divide-gray-100 max-h-60 overflow-y-auto">
@@ -796,18 +900,19 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
                         <button
                           onClick={() =>
                             handleSendWhatsApp(
-                              g.invitation!.id,
+                              g.invitation ? g.invitation.id : null,
                               g.prenom,
                               g.nom,
                               g.langue,
-                              g.invitation!.jeton_unique,
-                              g.telephone
+                              g.invitation ? g.invitation.jeton_unique : null,
+                              g.telephone,
+                              g.id
                             )
                           }
                           className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold flex items-center gap-1.5 shadow-xs transition-all"
                         >
                           <MessageSquare className="w-3.5 h-3.5" />
-                          <span>Envoyer</span>
+                          <span>Envoyer WhatsApp</span>
                         </button>
                       </div>
                     ))}
@@ -830,7 +935,7 @@ You are cordially invited to the grand CELSUC 2026 gala evening 🥳🎉
 
       {/* Add Student Modal */}
       {showAdd && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl">
             <h3 className="font-bold text-gray-900 text-lg mb-4">{t('addStudent')}</h3>
             <div className="space-y-3">
