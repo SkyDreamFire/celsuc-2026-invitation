@@ -35,19 +35,41 @@ export function QrCodePage({ jeton }: { jeton: string }) {
         setInvitation(inv);
         if (inv.students?.langue) setLang(inv.students.langue);
 
-        const { data: qr } = await supabase
-          .from('qr_codes')
-          .select('*')
-          .eq('invitation_id', inv.id)
-          .maybeSingle();
-        if (qr) {
-          setQrCode(qr as QrCode);
-          const url = await QRCodeLib.toDataURL(qr.jeton_qr_unique, {
-            width: 400,
-            margin: 2,
-            color: { dark: '#0f1a12', light: '#ffffff' },
-          });
-          setQrDataUrl(url);
+        if (inv.statut === 'confirmee') {
+          let { data: qr } = await supabase
+            .from('qr_codes')
+            .select('*')
+            .eq('invitation_id', inv.id)
+            .maybeSingle();
+
+          // Auto-création de sécurité si le QR code n'existe pas encore
+          if (!qr) {
+            const randomQrToken =
+              typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+                ? (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, '')
+                : Math.random().toString(36).substring(2) + Date.now().toString(36);
+
+            const { data: newQr } = await supabase
+              .from('qr_codes')
+              .upsert(
+                { invitation_id: inv.id, jeton_qr_unique: randomQrToken },
+                { onConflict: 'invitation_id' }
+              )
+              .select('*')
+              .maybeSingle();
+
+            qr = newQr;
+          }
+
+          if (qr) {
+            setQrCode(qr as QrCode);
+            const url = await QRCodeLib.toDataURL(qr.jeton_qr_unique, {
+              width: 400,
+              margin: 2,
+              color: { dark: '#0f1a12', light: '#ffffff' },
+            });
+            setQrDataUrl(url);
+          }
         }
       }
       setLoading(false);
