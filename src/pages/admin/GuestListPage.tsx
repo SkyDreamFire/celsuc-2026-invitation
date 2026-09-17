@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -118,26 +118,30 @@ export function GuestListPage() {
     fetchGuestsAndSettings();
   }, []);
 
-  const filtered = guests.filter((g) => {
-    const matchSearch =
-      !search ||
-      g.nom.toLowerCase().includes(search.toLowerCase()) ||
-      g.prenom.toLowerCase().includes(search.toLowerCase()) ||
-      g.telephone.includes(search) ||
-      (g.filiere_promotion && g.filiere_promotion.toLowerCase().includes(search.toLowerCase()));
-    const matchStatus =
-      filterStatus === 'all' ||
-      (filterStatus === 'en_attente' && (!g.invitation || g.invitation.statut === 'en_attente')) ||
-      (filterStatus !== 'en_attente' && g.invitation?.statut === filterStatus);
-    return matchSearch && matchStatus;
-  });
+  const filtered = useMemo(() => {
+    return guests.filter((g) => {
+      const matchSearch =
+        !search ||
+        g.nom.toLowerCase().includes(search.toLowerCase()) ||
+        g.prenom.toLowerCase().includes(search.toLowerCase()) ||
+        g.telephone.includes(search) ||
+        (g.filiere_promotion && g.filiere_promotion.toLowerCase().includes(search.toLowerCase()));
+      const matchStatus =
+        filterStatus === 'all' ||
+        (filterStatus === 'en_attente' && (!g.invitation || g.invitation.statut === 'en_attente')) ||
+        (filterStatus !== 'en_attente' && g.invitation?.statut === filterStatus);
+      return matchSearch && matchStatus;
+    });
+  }, [guests, search, filterStatus]);
 
-  const stats = {
-    total: guests.length,
-    pending: guests.filter((g) => !g.invitation || g.invitation?.statut === 'en_attente').length,
-    confirmed: guests.filter((g) => g.invitation?.statut === 'confirmee').length,
-    refused: guests.filter((g) => g.invitation?.statut === 'refusee').length,
-  };
+  const stats = useMemo(() => {
+    return {
+      total: guests.length,
+      pending: guests.filter((g) => !g.invitation || g.invitation?.statut === 'en_attente').length,
+      confirmed: guests.filter((g) => g.invitation?.statut === 'confirmee').length,
+      refused: guests.filter((g) => g.invitation?.statut === 'refusee').length,
+    };
+  }, [guests]);
 
   // Helper pour nettoyer et normaliser les numéros de téléphone camerounais/internationaux
   const formatPhoneForWhatsApp = (rawPhone: string) => {

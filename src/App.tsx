@@ -1,20 +1,33 @@
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { LanguageProvider } from '@/contexts/LanguageContext';
 import { useRouter } from '@/lib/router';
-import { HomePage } from '@/pages/public/HomePage';
-import { InvitationPage } from '@/pages/public/InvitationPage';
-import { QrCodePage } from '@/pages/public/QrCodePage';
-import { AdminLoginPage } from '@/pages/admin/AdminLoginPage';
-import { DashboardPage } from '@/pages/admin/DashboardPage';
-import { GuestListPage } from '@/pages/admin/GuestListPage';
-import { ImportPage } from '@/pages/admin/ImportPage';
-import { WhatsAppHistoryPage } from '@/pages/admin/WhatsAppHistoryPage';
-import { ScannerPage } from '@/pages/admin/ScannerPage';
-import { SettingsPage } from '@/pages/admin/SettingsPage';
-import { AdminManagementPage } from '@/pages/admin/AdminManagementPage';
-import { ExportPage } from '@/pages/admin/ExportPage';
 import type { AdminRole } from '@/lib/types';
+
+// Lazy-loaded pages for fast initial page load and bundle splitting
+const HomePage = lazy(() => import('@/pages/public/HomePage').then((m) => ({ default: m.HomePage })));
+const InvitationPage = lazy(() => import('@/pages/public/InvitationPage').then((m) => ({ default: m.InvitationPage })));
+const QrCodePage = lazy(() => import('@/pages/public/QrCodePage').then((m) => ({ default: m.QrCodePage })));
+const AdminLoginPage = lazy(() => import('@/pages/admin/AdminLoginPage').then((m) => ({ default: m.AdminLoginPage })));
+const DashboardPage = lazy(() => import('@/pages/admin/DashboardPage').then((m) => ({ default: m.DashboardPage })));
+const GuestListPage = lazy(() => import('@/pages/admin/GuestListPage').then((m) => ({ default: m.GuestListPage })));
+const ImportPage = lazy(() => import('@/pages/admin/ImportPage').then((m) => ({ default: m.ImportPage })));
+const WhatsAppHistoryPage = lazy(() => import('@/pages/admin/WhatsAppHistoryPage').then((m) => ({ default: m.WhatsAppHistoryPage })));
+const ScannerPage = lazy(() => import('@/pages/admin/ScannerPage').then((m) => ({ default: m.ScannerPage })));
+const SettingsPage = lazy(() => import('@/pages/admin/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+const AdminManagementPage = lazy(() => import('@/pages/admin/AdminManagementPage').then((m) => ({ default: m.AdminManagementPage })));
+const ExportPage = lazy(() => import('@/pages/admin/ExportPage').then((m) => ({ default: m.ExportPage })));
+
+function PageLoader() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50/50">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-10 h-10 border-3 border-emerald-600/20 border-t-emerald-600 rounded-full animate-spin" />
+        <p className="text-xs font-medium text-gray-400 tracking-wider uppercase">CELSUC 2026</p>
+      </div>
+    </div>
+  );
+}
 
 function ProtectedRoute({ children, roles }: { children: React.ReactNode; roles?: AdminRole[] }) {
   const { session, admin, loading } = useAuth();
@@ -27,11 +40,7 @@ function ProtectedRoute({ children, roles }: { children: React.ReactNode; roles?
   }, [session, admin, loading, navigate]);
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-gray-400">Loading...</p>
-      </div>
-    );
+    return <PageLoader />;
   }
 
   if (!session || !admin) {
@@ -147,10 +156,13 @@ function App() {
   return (
     <LanguageProvider>
       <AuthProvider>
-        <Routes />
+        <Suspense fallback={<PageLoader />}>
+          <Routes />
+        </Suspense>
       </AuthProvider>
     </LanguageProvider>
   );
 }
 
 export default App;
+
