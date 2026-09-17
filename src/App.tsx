@@ -2,6 +2,7 @@ import { useEffect, lazy, Suspense } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { LanguageProvider } from '@/contexts/LanguageContext';
 import { useRouter } from '@/lib/router';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import type { AdminRole } from '@/lib/types';
 
 // Lazy-loaded pages for fast initial page load and bundle splitting
@@ -154,13 +155,15 @@ function Routes() {
 
 function App() {
   return (
-    <LanguageProvider>
-      <AuthProvider>
-        <Suspense fallback={<PageLoader />}>
-          <Routes />
-        </Suspense>
-      </AuthProvider>
-    </LanguageProvider>
+    <ErrorBoundary>
+      <LanguageProvider>
+        <AuthProvider>
+          <Suspense fallback={<PageLoader />}>
+            <Routes />
+          </Suspense>
+        </AuthProvider>
+      </LanguageProvider>
+    </ErrorBoundary>
   );
 }
 
